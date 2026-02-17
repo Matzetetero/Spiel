@@ -2,15 +2,17 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <title>Mein Super Shooter</title>
+    <title>Space Shooter Pro</title>
     <style>
-        body { margin: 0; background: #111; color: white; display: flex; flex-direction: column; align-items: center; font-family: sans-serif; overflow: hidden; }
-        canvas { border: 2px solid #555; background: #000; cursor: crosshair; margin-top: 20px; }
+        body { margin: 0; background: #050505; color: #0f0; display: flex; flex-direction: column; align-items: center; font-family: 'Courier New', monospace; overflow: hidden; }
+        canvas { border: 3px solid #333; background: radial-gradient(circle, #111 0%, #000 100%); cursor: crosshair; box-shadow: 0 0 20px rgba(0,255,0,0.2); }
+        .hud { position: absolute; top: 10px; left: 10px; pointer-events: none; }
     </style>
 </head>
 <body>
-    <h1>Space Shooter</h1>
-    <p>Bewegen: Maus | Schießen: Linksklick</p>
+    <div class="hud">
+        SCORE: <span id="score">0</span> | HIGH: <span id="highscore">0</span>
+    </div>
     <canvas id="gameCanvas"></canvas>
 
     <script>
@@ -19,62 +21,111 @@
         canvas.width = 800; canvas.height = 600;
 
         let score = 0;
-        const player = { x: 400, y: 550, w: 40, h: 40 };
+        let highscore = localStorage.getItem('shooterHighscore') || 0;
+        document.getElementById('highscore').innerText = highscore;
+
+        let gameOver = false;
+        const player = { x: 400, y: 520, w: 50, h: 50, speed: 8 };
         const bullets = [];
         const enemies = [];
 
-        // Maus-Steuerung
+        // Steuerung
         window.addEventListener('mousemove', (e) => {
+            if (gameOver) return;
             const rect = canvas.getBoundingClientRect();
             player.x = e.clientX - rect.left - player.w / 2;
         });
 
         window.addEventListener('mousedown', () => {
-            bullets.push({ x: player.x + player.w / 2 - 2, y: player.y, w: 4, h: 10 });
+            if (gameOver) return location.reload(); // Neustart bei Klick
+            bullets.push({ x: player.x + player.w / 2 - 3, y: player.y, w: 6, h: 15 });
         });
 
         function spawnEnemy() {
-            enemies.push({ x: Math.random() * (canvas.width - 30), y: -30, w: 30, h: 30, speed: 2 + Math.random() * 2 });
+            if (gameOver) return;
+            // Zufällig starke Gegner (rot, 3 Leben) oder normale (lila, 1 Leben)
+            const isStrong = Math.random() > 0.8;
+            enemies.push({ 
+                x: Math.random() * (canvas.width - 40), 
+                y: -50, 
+                w: 40, h: 40, 
+                hp: isStrong ? 3 : 1, 
+                color: isStrong ? '#ff4444' : '#a0f',
+                speed: 1.5 + Math.random() * 2 
+            });
         }
-        setInterval(spawnEnemy, 1000);
+        setInterval(spawnEnemy, 800);
 
         function update() {
+            if (gameOver) return;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // Spieler zeichnen
-            ctx.fillStyle = '#00f';
-            ctx.fillRect(player.x, player.y, player.w, player.h);
+            // 1. Spieler zeichnen (Raumschiff-Grafik-Ersatz)
+            ctx.fillStyle = '#00d4ff';
+            ctx.beginPath();
+            ctx.moveTo(player.x + 25, player.y); // Spitze
+            ctx.lineTo(player.x, player.y + 50); // Links unten
+            ctx.lineTo(player.x + 50, player.y + 50); // Rechts unten
+            ctx.fill();
 
-            // Schüsse bewegen & zeichnen
+            // 2. Schüsse
             bullets.forEach((b, i) => {
-                b.y -= 7;
-                ctx.fillStyle = '#ff0';
+                b.y -= 10;
+                ctx.fillStyle = '#fff700';
                 ctx.fillRect(b.x, b.y, b.w, b.h);
                 if (b.y < 0) bullets.splice(i, 1);
             });
 
-            // Gegner bewegen, zeichnen & Kollision prüfen
+            // 3. Gegner & Logik
             enemies.forEach((e, ei) => {
                 e.y += e.speed;
-                ctx.fillStyle = '#f00';
+                
+                // Gegner zeichnen (mit HP Anzeige)
+                ctx.fillStyle = e.color;
                 ctx.fillRect(e.x, e.y, e.w, e.h);
+                ctx.fillStyle = 'white';
+                ctx.fillText("HP:" + e.hp, e.x + 5, e.y - 5);
 
-                // Trefferprüfung
+                // Kollision: Gegner trifft Spieler (Punkt 3)
+                if (player.x < e.x + e.w && player.x + player.w > e.x && player.y < e.y + e.h && player.y + player.h > e.y) {
+                    endGame();
+                }
+
+                // Trefferprüfung (Punkt 2)
                 bullets.forEach((b, bi) => {
                     if (b.x < e.x + e.w && b.x + b.w > e.x && b.y < e.y + e.h && b.y + b.h > e.y) {
-                        enemies.splice(ei, 1);
+                        e.hp--;
                         bullets.splice(bi, 1);
-                        score += 10;
+                        if (e.hp <= 0) {
+                            enemies.splice(ei, 1);
+                            score += 10;
+                            document.getElementById('score').innerText = score;
+                        }
                     }
                 });
 
-                if (e.y > canvas.height) { /* Game Over Logik hier */ enemies.splice(ei, 1); }
+                if (e.y > canvas.height) enemies.splice(ei, 1);
             });
 
-            ctx.fillStyle = 'white';
-            ctx.fillText("Score: " + score, 10, 20);
             requestAnimationFrame(update);
         }
+
+        function endGame() {
+            gameOver = true;
+            if (score > highscore) {
+                localStorage.setItem('shooterHighscore', score);
+                highscore = score;
+            }
+            ctx.fillStyle = 'rgba(0,0,0,0.8)';
+            ctx.fillRect(0,0,canvas.width, canvas.height);
+            ctx.fillStyle = 'red';
+            ctx.font = '40px Courier New';
+            ctx.fillText("GAME OVER", 280, 280);
+            ctx.fillStyle = 'white';
+            ctx.font = '20px Courier New';
+            ctx.fillText("Klick zum Neustart", 300, 320);
+        }
+
         update();
     </script>
 </body>
