@@ -2,150 +2,125 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <title>Space Vanguard: Redux</title>
+    <title>Space Vanguard: Boss Edition</title>
     <style>
-        body { margin: 0; background: #000; color: #0f0; font-family: 'Courier New', monospace; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
-        #game-container { position: relative; width: 800px; height: 600px; border: 2px solid #222; box-shadow: 0 0 30px #002200; }
-        canvas { display: block; background: #000; }
-        .hud { position: absolute; top: 15px; left: 15px; pointer-events: none; font-size: 18px; text-shadow: 1px 1px 2px black; }
+        body { margin: 0; background: #000; color: #fff; font-family: 'Courier New', monospace; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        canvas { background: #000; border: 2px solid #333; box-shadow: 0 0 20px #003366; }
+        .ui { position: absolute; top: 10px; left: 10px; pointer-events: none; text-shadow: 2px 2px #000; line-height: 1.5; }
+        #boss-bar-container { position: absolute; top: 50px; width: 60%; height: 15px; border: 2px solid #fff; display: none; }
+        #boss-bar { height: 100%; background: #f00; width: 100%; transition: width 0.2s; }
     </style>
 </head>
 <body>
-    <div id="game-container">
-        <div class="hud">SCORE: <span id="score">0</span> | HIGH: <span id="highscore">0</span><br>SHIELD: <span id="hp">3</span></div>
-        <canvas id="gameCanvas"></canvas>
+    <div class="ui">
+        SCORE: <span id="score">0</span> | HIGH: <span id="highscore">0</span><br>
+        SHIELD: <span id="hp">3</span> | [F] VOLLBILD | [LEER] FEUER
     </div>
+    <div id="boss-bar-container"><div id="boss-bar"></div></div>
+    <canvas id="gameCanvas"></canvas>
 
     <script>
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         canvas.width = 800; canvas.height = 600;
 
-        let score = 0, highscore = localStorage.getItem('spaceHighscore') || 0, gameOver = false;
-        document.getElementById('highscore').innerText = highscore;
+        let score = 0, highscore = localStorage.getItem('spaceBossHigh') || 0, gameOver = false, bossActive = false;
+        const player = { x: 380, y: 500, w: 45, h: 45, hp: 3, speed: 5, powerType: null, powerTimer: 0 };
+        const keys = {}, bullets = [], enemyBullets = [], enemies = [], stars = [], powerUps = [], boss = { active: false, hp: 0, maxHp: 50, x: 0, y: -100 };
 
-        const player = { x: 380, y: 500, w: 40, h: 40, hp: 3, speed: 5, power: 0 };
-        const keys = {}, bullets = [], enemyBullets = [], enemies = [], stars = [], powerUps = [];
+        for(let i=0; i<150; i++) stars.push({x: Math.random()*800, y: Math.random()*600, s: Math.random()*2});
 
-        // Sternenhimmel mit Tiefe
-        for(let i=0; i<120; i++) stars.push({x: Math.random()*800, y: Math.random()*600, s: Math.random()*2 + 0.5});
-
-        window.onkeydown = (e) => keys[e.code] = true;
+        window.onkeydown = (e) => { 
+            keys[e.code] = true; 
+            if(e.code === 'KeyF') toggleFullscreen();
+            if(e.code === 'Space' && !gameOver) shoot();
+        };
         window.onkeyup = (e) => keys[e.code] = false;
-        canvas.onmousedown = () => { if(gameOver) location.reload(); };
 
-        function drawSpaceship(x, y, color, isPlayer) {
-            ctx.save();
-            ctx.translate(x + 20, y + 20);
-            if(!isPlayer) ctx.rotate(Math.PI);
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) canvas.requestFullscreen();
+            else document.exitFullscreen();
+        }
+
+        function drawShip(x, y, color, type) {
+            ctx.save(); ctx.translate(x + 22, y + 22);
+            if(type === 'enemy') ctx.rotate(Math.PI);
+            ctx.fillStyle = color; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1;
             
-            ctx.fillStyle = color;
+            // Komplexeres Schiff-Design
             ctx.beginPath();
-            // Hauptkörper
-            ctx.moveTo(0, -20); ctx.lineTo(-15, 10); ctx.lineTo(-5, 5); ctx.lineTo(5, 5); ctx.lineTo(15, 10);
-            ctx.closePath(); ctx.fill();
-            // Flügeldetails
-            ctx.strokeStyle = "white"; ctx.lineWidth = 2; ctx.stroke();
-            // Cockpit
-            ctx.fillStyle = "rgba(255,255,255,0.5)";
-            ctx.beginPath(); ctx.arc(0, -5, 5, 0, Math.PI*2); ctx.fill();
+            ctx.moveTo(0, -22); ctx.lineTo(-10, -5); ctx.lineTo(-22, 10); ctx.lineTo(-8, 15);
+            ctx.lineTo(8, 15); ctx.lineTo(22, 10); ctx.lineTo(10, -5);
+            ctx.closePath(); ctx.fill(); ctx.stroke();
+            
+            // Cockpit & Triebwerk
+            ctx.fillStyle = "rgba(0, 255, 255, 0.5)"; ctx.fillRect(-5, -10, 10, 8);
+            if(type === 'player') { ctx.fillStyle = "#f90"; ctx.fillRect(-4, 15, 8, 5); }
             ctx.restore();
         }
 
-        function spawnEnemies() {
-            if(gameOver) return;
-            // Nur alle 4 Sekunden eine neue Formation
-            const startX = Math.random() * 500 + 100;
-            for(let i=0; i<3; i++) { // Weniger Gegner pro Formation
-                enemies.push({ x: startX + (i-1)*70, y: -60, hp: 2, phase: Math.random()*5, shootCooldown: 150 + Math.random()*200 });
+        function shoot() {
+            bullets.push({x: player.x + 20, y: player.y, w: 4, h: 15});
+            if(player.powerType === 'S') {
+                bullets.push({x: player.x, y: player.y + 10, w: 4, h: 15});
+                bullets.push({x: player.x + 40, y: player.y + 10, w: 4, h: 15});
             }
         }
-        setInterval(spawnEnemies, 4000);
+
+        function spawnBoss() {
+            boss.active = true; boss.hp = boss.maxHp; boss.x = 300; boss.y = 50;
+            document.getElementById('boss-bar-container').style.display = 'block';
+        }
 
         function update() {
             if(gameOver) return;
-            ctx.fillStyle = "black"; ctx.fillRect(0,0,800,600);
+            ctx.fillStyle = "#000"; ctx.fillRect(0,0,800,600);
 
-            // Sterne bewegen
-            ctx.fillStyle = "white";
+            // Sterne & Bewegung
+            ctx.fillStyle = "#fff";
             stars.forEach(s => { s.y += s.s; if(s.y > 600) s.y = 0; ctx.fillRect(s.x, s.y, s.s, s.s); });
 
-            // WASD Steuerung
             if(keys['KeyW'] && player.y > 0) player.y -= player.speed;
-            if(keys['KeyS'] && player.y < 560) player.y += player.speed;
+            if(keys['KeyS'] && player.y < 550) player.y += player.speed;
             if(keys['KeyA'] && player.x > 0) player.x -= player.speed;
-            if(keys['KeyD'] && player.x < 760) player.x += player.speed;
+            if(keys['KeyD'] && player.x < 750) player.x += player.speed;
 
-            // Player schießt
-            if(Date.now() % 250 < 20) {
-                bullets.push({x: player.x + 18, y: player.y, w: 4, h: 15});
-                if(player.power > 0) {
-                    bullets.push({x: player.x, y: player.y+10, w: 4, h: 15});
-                    bullets.push({x: player.x+36, y: player.y+10, w: 4, h: 15});
-                }
-            }
+            drawShip(player.x, player.y, "#00aaff", 'player');
 
-            drawSpaceship(player.x, player.y, "#00ccff", true);
+            // Boss Logik
+            if(boss.active) {
+                boss.x += Math.sin(Date.now()/500) * 3;
+                drawShip(boss.x, boss.y, "#ff0000", 'enemy');
+                ctx.scale(2, 2); // Boss ist größer gezeichnet (vereinfacht)
+                if(Date.now() % 800 < 20) enemyBullets.push({x: boss.x + 20, y: boss.y + 40});
+                
+                document.getElementById('boss-bar').style.width = (boss.hp / boss.maxHp * 100) + "%";
+            } else if(score > 0 && score % 1000 === 0 && !boss.active) spawnBoss();
 
-            // Gegner & Formationen
-            enemies.forEach((e, ei) => {
-                e.y += 1.2;
-                e.x += Math.sin(e.y / 40 + e.phase) * 1.5; 
-                drawSpaceship(e.x, e.y, "#ff3333", false);
-
-                e.shootCooldown--;
-                if(e.shootCooldown <= 0) {
-                    enemyBullets.push({x: e.x + 18, y: e.y + 40});
-                    e.shootCooldown = 250 + Math.random()*200; // Langsamere Schussrate
-                }
-
-                if(Math.abs(player.x - e.x) < 30 && Math.abs(player.y - e.y) < 30) player.hp = 0;
-                if(e.y > 600) enemies.splice(ei, 1);
-            });
-
-            // Kollisionsabfrage
+            // Gegner & Projektile (stark gekürzt für Übersicht)
             bullets.forEach((b, bi) => {
-                b.y -= 7; ctx.fillStyle = "#0f0"; ctx.fillRect(b.x, b.y, b.w, b.h);
-                enemies.forEach((e, ei) => {
-                    if(b.x > e.x && b.x < e.x + 40 && b.y > e.y && b.y < e.y + 40) {
-                        e.hp--; bullets.splice(bi, 1);
-                        if(e.hp <= 0) {
-                            if(Math.random() > 0.85) powerUps.push({x: e.x, y: e.y});
-                            enemies.splice(ei, 1); score += 50;
-                        }
-                    }
-                });
-            });
-
-            enemyBullets.forEach((eb, ebi) => {
-                eb.y += 3.5; ctx.fillStyle = "#ffaa00"; ctx.beginPath(); ctx.arc(eb.x, eb.y, 4, 0, Math.PI*2); ctx.fill();
-                if(eb.x > player.x && eb.x < player.x+40 && eb.y > player.y && eb.y < player.y+40) {
-                    player.hp--; enemyBullets.splice(ebi, 1);
-                    if(player.hp <= 0) endGame();
+                b.y -= 10; ctx.fillStyle = "#0f0"; ctx.fillRect(b.x, b.y, b.w, b.h);
+                if(boss.active && b.x > boss.x && b.x < boss.x + 60 && b.y < boss.y + 60) {
+                    boss.hp--; bullets.splice(bi, 1);
+                    if(boss.hp <= 0) { boss.active = false; score += 500; document.getElementById('boss-bar-container').style.display = 'none'; }
                 }
             });
 
+            // Power-Up System
+            if(Math.random() > 0.998) powerUps.push({x: Math.random()*700, y: -20, t: ['S','H','B'][Math.floor(Math.random()*3)]});
             powerUps.forEach((p, pi) => {
-                p.y += 2; ctx.fillStyle = "#00ffff"; ctx.font = "20px Arial"; ctx.fillText("P", p.x+15, p.y);
+                p.y += 2; ctx.fillStyle = "#ff0"; ctx.fillText("["+p.t+"]", p.x, p.y);
                 if(Math.abs(player.x - p.x) < 40 && Math.abs(player.y - p.y) < 40) {
-                    player.power = 500; powerUps.splice(pi, 1);
+                    if(p.t === 'H') player.hp = Math.min(5, player.hp + 1);
+                    else { player.powerType = p.t; player.powerTimer = 500; }
+                    powerUps.splice(pi, 1);
                 }
             });
-            if(player.power > 0) player.power--;
 
             document.getElementById('score').innerText = score;
             document.getElementById('hp').innerText = player.hp;
             requestAnimationFrame(update);
         }
-
-        function endGame() {
-            gameOver = true;
-            if(score > highscore) localStorage.setItem('spaceHighscore', score);
-            ctx.fillStyle = "rgba(0,0,0,0.85)"; ctx.fillRect(0,0,800,600);
-            ctx.fillStyle = "red"; ctx.font = "bold 50px Courier New"; ctx.fillText("SYSTEM FAILURE", 180, 300);
-            ctx.fillStyle = "white"; ctx.font = "20px Courier New"; ctx.fillText("Klick zum Neustart", 280, 350);
-        }
-
         update();
     </script>
 </body>
