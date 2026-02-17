@@ -2,13 +2,13 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <title>Space Vanguard: Boss Edition</title>
+    <title>Space Vanguard: Definitiv mit Gegnern</title>
     <style>
         body { margin: 0; background: #000; color: #fff; font-family: 'Courier New', monospace; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
         canvas { background: #000; border: 2px solid #333; box-shadow: 0 0 20px #003366; }
-        .ui { position: absolute; top: 10px; left: 10px; pointer-events: none; text-shadow: 2px 2px #000; line-height: 1.5; }
-        #boss-bar-container { position: absolute; top: 50px; width: 60%; height: 15px; border: 2px solid #fff; display: none; }
-        #boss-bar { height: 100%; background: #f00; width: 100%; transition: width 0.2s; }
+        .ui { position: absolute; top: 10px; left: 10px; pointer-events: none; text-shadow: 2px 2px #000; line-height: 1.5; z-index: 10; }
+        #boss-ui { position: absolute; top: 50px; width: 60%; height: 15px; border: 2px solid #fff; display: none; z-index: 10; }
+        #boss-bar { height: 100%; background: #f00; width: 100%; }
     </style>
 </head>
 <body>
@@ -16,7 +16,7 @@
         SCORE: <span id="score">0</span> | HIGH: <span id="highscore">0</span><br>
         SHIELD: <span id="hp">3</span> | [F] VOLLBILD | [LEER] FEUER
     </div>
-    <div id="boss-bar-container"><div id="boss-bar"></div></div>
+    <div id="boss-ui"><div id="boss-bar"></div></div>
     <canvas id="gameCanvas"></canvas>
 
     <script>
@@ -24,11 +24,14 @@
         const ctx = canvas.getContext('2d');
         canvas.width = 800; canvas.height = 600;
 
-        let score = 0, highscore = localStorage.getItem('spaceBossHigh') || 0, gameOver = false, bossActive = false;
+        let score = 0, highscore = localStorage.getItem('spaceBossHigh') || 0, gameOver = false;
+        let bossActive = false;
         const player = { x: 380, y: 500, w: 45, h: 45, hp: 3, speed: 5, powerType: null, powerTimer: 0 };
-        const keys = {}, bullets = [], enemyBullets = [], enemies = [], stars = [], powerUps = [], boss = { active: false, hp: 0, maxHp: 50, x: 0, y: -100 };
+        const keys = {}, bullets = [], enemyBullets = [], enemies = [], stars = [], powerUps = [];
+        const boss = { x: 300, y: -100, hp: 0, maxHp: 50, speed: 2, dir: 1 };
 
-        for(let i=0; i<150; i++) stars.push({x: Math.random()*800, y: Math.random()*600, s: Math.random()*2});
+        // Sterne Hintergrund
+        for(let i=0; i<100; i++) stars.push({x: Math.random()*800, y: Math.random()*600, s: Math.random()*2});
 
         window.onkeydown = (e) => { 
             keys[e.code] = true; 
@@ -42,85 +45,130 @@
             else document.exitFullscreen();
         }
 
-        function drawShip(x, y, color, type) {
-            ctx.save(); ctx.translate(x + 22, y + 22);
-            if(type === 'enemy') ctx.rotate(Math.PI);
-            ctx.fillStyle = color; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1;
-            
-            // Komplexeres Schiff-Design
-            ctx.beginPath();
-            ctx.moveTo(0, -22); ctx.lineTo(-10, -5); ctx.lineTo(-22, 10); ctx.lineTo(-8, 15);
-            ctx.lineTo(8, 15); ctx.lineTo(22, 10); ctx.lineTo(10, -5);
-            ctx.closePath(); ctx.fill(); ctx.stroke();
-            
-            // Cockpit & Triebwerk
-            ctx.fillStyle = "rgba(0, 255, 255, 0.5)"; ctx.fillRect(-5, -10, 10, 8);
-            if(type === 'player') { ctx.fillStyle = "#f90"; ctx.fillRect(-4, 15, 8, 5); }
-            ctx.restore();
-        }
-
         function shoot() {
             bullets.push({x: player.x + 20, y: player.y, w: 4, h: 15});
-            if(player.powerType === 'S') {
-                bullets.push({x: player.x, y: player.y + 10, w: 4, h: 15});
-                bullets.push({x: player.x + 40, y: player.y + 10, w: 4, h: 15});
+            if(player.powerType === 'S') { // Triple Shot
+                bullets.push({x: player.x - 5, y: player.y + 15, w: 4, h: 15});
+                bullets.push({x: player.x + 45, y: player.y + 15, w: 4, h: 15});
             }
         }
 
-        function spawnBoss() {
-            boss.active = true; boss.hp = boss.maxHp; boss.x = 300; boss.y = 50;
-            document.getElementById('boss-bar-container').style.display = 'block';
+        function drawShip(x, y, color, isPlayer) {
+            ctx.save();
+            ctx.translate(x + 22, y + 22);
+            if(!isPlayer) ctx.rotate(Math.PI);
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.moveTo(0, -22); ctx.lineTo(-20, 15); ctx.lineTo(-10, 10); ctx.lineTo(10, 10); ctx.lineTo(20, 15);
+            ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = "#fff"; ctx.stroke();
+            // Cockpit
+            ctx.fillStyle = "rgba(0,255,255,0.5)"; ctx.beginPath(); ctx.arc(0, -5, 6, 0, Math.PI*2); ctx.fill();
+            ctx.restore();
         }
+
+        function spawnEnemy() {
+            if(gameOver || bossActive) return;
+            enemies.push({ x: Math.random()*750, y: -50, hp: 2, speed: 1.5 + Math.random()*2, shootCooldown: 100 });
+        }
+        setInterval(spawnEnemy, 1500); // Alle 1.5 Sek ein Gegner
 
         function update() {
             if(gameOver) return;
             ctx.fillStyle = "#000"; ctx.fillRect(0,0,800,600);
 
-            // Sterne & Bewegung
+            // Sterne
             ctx.fillStyle = "#fff";
             stars.forEach(s => { s.y += s.s; if(s.y > 600) s.y = 0; ctx.fillRect(s.x, s.y, s.s, s.s); });
 
+            // Steuerung
             if(keys['KeyW'] && player.y > 0) player.y -= player.speed;
             if(keys['KeyS'] && player.y < 550) player.y += player.speed;
             if(keys['KeyA'] && player.x > 0) player.x -= player.speed;
             if(keys['KeyD'] && player.x < 750) player.x += player.speed;
 
-            drawShip(player.x, player.y, "#00aaff", 'player');
+            drawShip(player.x, player.y, "#00aaff", true);
 
-            // Boss Logik
-            if(boss.active) {
-                boss.x += Math.sin(Date.now()/500) * 3;
-                drawShip(boss.x, boss.y, "#ff0000", 'enemy');
-                ctx.scale(2, 2); // Boss ist größer gezeichnet (vereinfacht)
-                if(Date.now() % 800 < 20) enemyBullets.push({x: boss.x + 20, y: boss.y + 40});
-                
+            // Boss Check
+            if(score >= 1000 && !bossActive) {
+                bossActive = true;
+                boss.hp = boss.maxHp; boss.y = 50;
+                document.getElementById('boss-ui').style.display = 'block';
+            }
+
+            if(bossActive) {
+                boss.x += boss.speed * boss.dir;
+                if(boss.x > 700 || boss.x < 50) boss.dir *= -1;
+                drawShip(boss.x, boss.y, "#ff0000", false);
+                if(Math.random() > 0.97) enemyBullets.push({x: boss.x+20, y: boss.y+40});
                 document.getElementById('boss-bar').style.width = (boss.hp / boss.maxHp * 100) + "%";
-            } else if(score > 0 && score % 1000 === 0 && !boss.active) spawnBoss();
+            }
 
-            // Gegner & Projektile (stark gekürzt für Übersicht)
-            bullets.forEach((b, bi) => {
-                b.y -= 10; ctx.fillStyle = "#0f0"; ctx.fillRect(b.x, b.y, b.w, b.h);
-                if(boss.active && b.x > boss.x && b.x < boss.x + 60 && b.y < boss.y + 60) {
-                    boss.hp--; bullets.splice(bi, 1);
-                    if(boss.hp <= 0) { boss.active = false; score += 500; document.getElementById('boss-bar-container').style.display = 'none'; }
+            // Normale Gegner
+            enemies.forEach((e, ei) => {
+                e.y += e.speed;
+                drawShip(e.x, e.y, "#ff5555", false);
+                if(e.y > 600) enemies.splice(ei, 1);
+                
+                if(Math.abs(player.x - e.x) < 40 && Math.abs(player.y - e.y) < 40) endGame();
+
+                e.shootCooldown--;
+                if(e.shootCooldown <= 0) {
+                    enemyBullets.push({x: e.x + 20, y: e.y + 40});
+                    e.shootCooldown = 150 + Math.random()*100;
                 }
             });
 
-            // Power-Up System
-            if(Math.random() > 0.998) powerUps.push({x: Math.random()*700, y: -20, t: ['S','H','B'][Math.floor(Math.random()*3)]});
+            // Projektile & Kollision
+            bullets.forEach((b, bi) => {
+                b.y -= 10; ctx.fillStyle = "#0f0"; ctx.fillRect(b.x, b.y, b.w, b.h);
+                if(bossActive && b.x > boss.x && b.x < boss.x+50 && b.y < boss.y+50) {
+                    boss.hp--; bullets.splice(bi, 1);
+                    if(boss.hp <= 0) { bossActive = false; score += 1000; document.getElementById('boss-ui').style.display = 'none'; }
+                }
+                enemies.forEach((e, ei) => {
+                    if(b.x > e.x && b.x < e.x+45 && b.y > e.y && b.y < e.y+45) {
+                        e.hp--; bullets.splice(bi, 1);
+                        if(e.hp <= 0) { enemies.splice(ei, 1); score += 100; if(Math.random() > 0.9) spawnPowerUp(e.x, e.y); }
+                    }
+                });
+            });
+
+            enemyBullets.forEach((eb, ebi) => {
+                eb.y += 4; ctx.fillStyle = "#ffaa00"; ctx.beginPath(); ctx.arc(eb.x, eb.y, 5, 0, Math.PI*2); ctx.fill();
+                if(Math.abs(eb.x - (player.x+22)) < 20 && Math.abs(eb.y - (player.y+22)) < 20) {
+                    player.hp--; enemyBullets.splice(ebi, 1);
+                    if(player.hp <= 0) endGame();
+                }
+            });
+
+            // PowerUps
             powerUps.forEach((p, pi) => {
-                p.y += 2; ctx.fillStyle = "#ff0"; ctx.fillText("["+p.t+"]", p.x, p.y);
+                p.y += 2; ctx.fillStyle = "#0ff"; ctx.fillText("["+p.t+"]", p.x, p.y);
                 if(Math.abs(player.x - p.x) < 40 && Math.abs(player.y - p.y) < 40) {
-                    if(p.t === 'H') player.hp = Math.min(5, player.hp + 1);
+                    if(p.t === 'H') player.hp = 3;
                     else { player.powerType = p.t; player.powerTimer = 500; }
                     powerUps.splice(pi, 1);
                 }
             });
+            if(player.powerTimer > 0) { player.powerTimer--; if(player.powerTimer <= 0) player.powerType = null; }
 
             document.getElementById('score').innerText = score;
             document.getElementById('hp').innerText = player.hp;
             requestAnimationFrame(update);
         }
+
+        function spawnPowerUp(x, y) { powerUps.push({x, y, t: Math.random() > 0.5 ? 'S' : 'H'}); }
+
+        function endGame() {
+            gameOver = true;
+            if(score > highscore) localStorage.setItem('spaceBossHigh', score);
+            ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(0,0,800,600);
+            ctx.fillStyle = "red"; ctx.font = "40px Arial"; ctx.fillText("MISSION GESCHEITERT", 180, 300);
+            ctx.fillStyle = "white"; ctx.font = "20px Arial"; ctx.fillText("Klick zum Neustart", 300, 350);
+            canvas.onclick = () => location.reload();
+        }
+
         update();
     </script>
 </body>
